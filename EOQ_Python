@@ -1,0 +1,67 @@
+import pyomo.environ as pyo
+from pyomo.environ import *
+from pyomo.opt import SolverFactory
+
+model = pyo.ConcreteModel()
+
+# Time periods
+model.T = pyo.RangeSet(5)
+
+# parameters during period t
+model.d = {1: 5.0, 2:7.0, 3:6.2, 4:3.1, 5:1.7}          # d = demand
+model.c = {1: 4.6, 2:4.6, 3:4.6, 4:4.6, 5:4.6}          # c = setup cost
+model.h_pos = {1: 0.7, 2:0.7, 3:0.7, 4:0.7, 5:0.7}      # h_pos = inventory holding cost
+model.h_neg = {1: 1.2, 2:1.2, 3:1.2, 4:1.2, 5:1.2}      # h_neg = shortage cost
+model.P = {1: 5.0, 2:5.0, 3:5.0, 4:5.0, 5:5.0}          # P = maximum production amount
+i0 = 5                                                # i0 = initial inventory
+
+# Define the variables
+model.y = pyo.Var(model.T, domain=pyo.Binary)
+model.x = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+model.i = pyo.Var(model.T)
+model.i_pos = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+model.i_neg = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+
+# Simplifying parameters
+T = model.T
+d = model.d
+c = model.c
+P = model.P
+h_pos = model.h_pos
+h_neg = model.h_neg
+
+# Define the inventory relationships
+def inventory_rule(m, t):
+    if t == m.T.first():
+        return m.i[t] == i0 + m.x[t] - d[t]
+    return m.i[t] == m.i[t-1] + m.x[t] - d[t]
+model.inventory = pyo.Constraint(model.T, rule=inventory_rule)
+
+def pos_neg_rule(m, t):
+    return m.i[t] == m.i_pos[t] - m.i_neg[t]
+model.pos_neg = pyo.Constraint(model.T, rule=pos_neg_rule)
+
+# Create the big-M constraint for the production indicator variable
+def prod_indicator_rule(m,t):
+    return m.x[t] <= m.P[t]*m.y[t]
+model.prod_indicator = pyo.Constraint(model.T, rule=prod_indicator_rule)
+
+# Define the cost function
+def obj_rule(m,t):
+    return sum(m.c[t]*m.y[t] + m.h_pos[t]*m.i_pos[t] + m.h_neg[t]*m.i_neg[t] for t in m.T)
+model.obj = pyo.Objective(rule=obj_rule)
+
+# solve the problem
+solver = pyo.SolverFactory('glpk')
+solver.solve(model)
+
+# Print the results
+print('--------------------------------TIC Optimal----------------------------------')
+TIC_Optimal = pyo.value(obj_rule(model, T))
+print('TIC Optimal =', TIC_Optimal)
+print('----------------------------------x[t]----------------------------------------')
+for t in model.T:
+    print('Period: {0}, Prod. Amount: {1}'.format(t, pyo.value(model.x[t])))
+print('----------------------------------i[t]----------------------------------------')
+for t in model.T:
+    print('Period: {0}, Prod. Amount: {1}'.format(t, pyo.value(model.i[t])))
